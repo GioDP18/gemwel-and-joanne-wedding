@@ -1,0 +1,97 @@
+.camera-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: linear-gradient(160deg, #f2efe9 0%, #e0ebdf 100%);
+}
+
+.camera-card {
+  width: min(860px, 100%);
+  background: #fffdf9;
+  border: 1px solid #c9d4c8;
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(50, 70, 50, 0.12);
+}
+
+.camera-card h1 {
+  margin: 0 0 8px;
+  font-size: 2rem;
+}
+
+.camera-card p {
+  margin: 0 0 18px;
+}
+
+.camera-frame {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #d2ddd1;
+  background: #dce7db;
+  aspect-ratio: 16 / 10;
+}
+
+.camera-frame video,
+.camera-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.camera-canvas {
+  display: none;
+}
+
+.camera-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.camera-btn {
+  margin-top: 16px;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 20px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.camera-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.camera-btn.primary {
+  background: #496b51;
+  color: #fff;
+}
+
+.camera-btn.secondary {
+  background: #e9eee8;
+  color: #273128;
+}
+
+.camera-message {
+  margin-top: 12px;
+  font-size: 0.95rem;
+}
+
+.camera-message.success {
+  color: #1e7a2a;
+}
+
+.camera-message.error {
+  color: #b22a2a;
+}
+
+@media (max-width: 640px) {
+  .camera-card {
+    padding: 16px;
+  }
+
+  .camera-actions {
+    flex-direction: column;
+  }
+}

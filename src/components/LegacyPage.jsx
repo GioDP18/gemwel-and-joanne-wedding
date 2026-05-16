@@ -1,6 +1,7 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { pageToRoute } from '../pages';
+import bgMusic from '../assets/bg-music.mp3';
 
 const injectedScriptAttr = 'data-legacy-script';
 const injectedStyleAttr = 'data-legacy-style';
@@ -47,12 +48,55 @@ const runLegacyLoadLifecycle = () => {
   }
 };
 
-export default function LegacyPage({ page }) {
+export default function LegacyPage() {
   const navigate = useNavigate();
   const [html, setHtml] = useState('');
   const [notFound, setNotFound] = useState(false);
 
-  const htmlPath = useMemo(() => `/legacy-pages/${page}`, [page]);
+  const htmlPath = '/legacy-pages/index.html';
+
+  useEffect(() => {
+    const audio = document.createElement('audio');
+    audio.src = bgMusic;
+    audio.loop = true;
+    audio.preload = 'auto';
+    audio.volume = 0.4;
+    audio.muted = true;
+    audio.autoplay = true;
+    audio.setAttribute('playsinline', '');
+    audio.setAttribute('webkit-playsinline', '');
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+
+    const startAudio = () => {
+      audio.play().catch(() => {});
+    };
+
+    const onFirstInteraction = () => {
+      audio.muted = false;
+      startAudio();
+      document.removeEventListener('pointerdown', onFirstInteraction);
+      document.removeEventListener('touchstart', onFirstInteraction);
+      document.removeEventListener('keydown', onFirstInteraction);
+    };
+
+    startAudio();
+    window.addEventListener('load', startAudio);
+    document.addEventListener('visibilitychange', startAudio);
+    document.addEventListener('pointerdown', onFirstInteraction);
+    document.addEventListener('touchstart', onFirstInteraction);
+    document.addEventListener('keydown', onFirstInteraction);
+
+    return () => {
+      audio.pause();
+      audio.remove();
+      window.removeEventListener('load', startAudio);
+      document.removeEventListener('visibilitychange', startAudio);
+      document.removeEventListener('pointerdown', onFirstInteraction);
+      document.removeEventListener('touchstart', onFirstInteraction);
+      document.removeEventListener('keydown', onFirstInteraction);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;

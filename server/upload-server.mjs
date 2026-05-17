@@ -10,7 +10,7 @@ const app = express();
 const port = process.env.UPLOAD_SERVER_PORT || 8787;
 
 app.use(cors());
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '50mb' }));
 
 const requiredEnv = [
   'GOOGLE_OAUTH_CLIENT_ID',
@@ -94,6 +94,16 @@ app.post('/api/upload-wedding-photo', async (req, res) => {
       error: error?.message || 'Failed to upload image to Google Drive.',
     });
   }
+});
+
+app.use((error, _req, res, next) => {
+  if (error?.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Uploaded image is too large. Please try a smaller image.',
+    });
+  }
+
+  return next(error);
 });
 
 app.listen(port, () => {

@@ -90,6 +90,7 @@ export default async function handler(req, res) {
     const fileName = `wedding-moment-${now.toISOString().replace(/[:.]/g, '-')}.jpg`;
 
     const upload = await drive.files.create({
+      supportsAllDrives: true,
       requestBody: {
         name: fileName,
         parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],

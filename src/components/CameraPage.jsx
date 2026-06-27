@@ -6,6 +6,13 @@ const LOCAL_UPLOAD_SERVER_ORIGIN = 'http://localhost:8787';
 const FILE_INPUT_ID = 'camera-upload-input';
 const MAX_UPLOAD_DIMENSION = 1920;
 const JPEG_QUALITY = 0.86;
+const CAMERA_FILTERS = [
+  { id: 'none', label: 'Natural', css: 'none' },
+  { id: 'warm', label: 'Warm', css: 'saturate(1.08) contrast(1.03) sepia(0.18) hue-rotate(-8deg)' },
+  { id: 'cool', label: 'Cool', css: 'saturate(1.04) contrast(1.03) hue-rotate(12deg)' },
+  { id: 'mono', label: 'Mono', css: 'grayscale(1) contrast(1.08)' },
+  { id: 'vivid', label: 'Vivid', css: 'saturate(1.32) contrast(1.08)' },
+];
 
 function resolveUploadEndpoint() {
   const configuredBase = import.meta.env.VITE_UPLOAD_API_BASE_URL?.trim();
@@ -71,6 +78,10 @@ async function prepareImageDataUrl(file) {
   }
 }
 
+function getCameraFilterCss(filterId) {
+  return CAMERA_FILTERS.find((filter) => filter.id === filterId)?.css || 'none';
+}
+
 async function prepareUploadItem(file) {
   if (file.type.startsWith('image/')) {
     return {
@@ -105,6 +116,10 @@ export default function CameraPage() {
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const [isDragActive, setIsDragActive] = useState(false);
+  const [cameraFilter, setCameraFilter] = useState('none');
+  const [cameraZoom, setCameraZoom] = useState(1);
+  const [showGrid, setShowGrid] = useState(true);
+  const [cameraFacingMode, setCameraFacingMode] = useState('environment');
 
   const startCamera = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -115,8 +130,8 @@ export default function CameraPage() {
     stopCamera();
     try {
       const candidates = [
-        { video: { facingMode: { exact: 'environment' } }, audio: false },
-        { video: { facingMode: { ideal: 'environment' } }, audio: false },
+        { video: { facingMode: { exact: cameraFacingMode } }, audio: false },
+        { video: { facingMode: { ideal: cameraFacingMode } }, audio: false },
         { video: true, audio: false },
       ];
 
@@ -151,7 +166,7 @@ export default function CameraPage() {
   useEffect(() => {
     startCamera();
     return () => stopCamera();
-  }, []);
+  }, [cameraFacingMode]);
 
   const capturePhoto = () => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -164,7 +179,33 @@ export default function CameraPage() {
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0, width, height);
+    const filterCss = getCameraFilterCss(cameraFilter);
+    ctx.filter = filterCss;
+
+    if (cameraZoom > 1) {
+      const sourceWidth = width / cameraZoom;
+      const sourceHeight = height / cameraZoom;
+      const sourceX = (width - sourceWidth) / 2;
+      const sourceY = (height - sourceHeight) / 2;
+      if (cameraFacingMode === 'user') {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, -width, 0, width, height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
+      }
+    } else {
+      if (cameraFacingMode === 'user') {
+        ctx.save();
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, -width, 0, width, height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, width, height);
+      }
+    }
+    ctx.filter = 'none';
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     setCapturedImage(dataUrl);
@@ -187,6 +228,13 @@ export default function CameraPage() {
     setStatus('idle');
     setMessage('');
     await startCamera();
+  };
+
+  const switchCamera = async () => {
+    setCapturedImage('');
+    setStatus('idle');
+    setMessage('');
+    setCameraFacingMode((current) => (current === 'environment' ? 'user' : 'environment'));
   };
 
   const addFiles = async (files) => {
@@ -289,11 +337,67 @@ export default function CameraPage() {
 
         <div className="camera-frame">
           {!capturedImage ? (
-            <video ref={videoRef} autoPlay playsInline muted />
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                filter: getCameraFilterCss(cameraFilter),
+                transform: `scale(${cameraZoom}) ${cameraFacingMode === 'user' ? 'scaleX(-1)' : ''}`,
+              }}
+            />
           ) : (
             <img src={capturedImage} alt="Captured wedding moment" />
           )}
+          {!capturedImage && showGrid ? <div className="camera-grid" aria-hidden="true" /> : null}
           <canvas ref={canvasRef} className="camera-canvas" />
+        </div>
+
+        <div className="camera-toolbox">
+          <div className="camera-tool">
+            <label htmlFor="camera-filter">Filter</label>
+            <select
+              id="camera-filter"
+              value={cameraFilter}
+              onChange={(event) => setCameraFilter(event.target.value)}
+              className="camera-select"
+              disabled={status === 'uploading'}
+            >
+              {CAMERA_FILTERS.map((filter) => (
+                <option key={filter.id} value={filter.id}>
+                  {filter.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="camera-tool">
+            <label htmlFor="camera-zoom">Zoom</label>
+            <input
+              id="camera-zoom"
+              type="range"
+              min="1"
+              max="2"
+              step="0.05"
+              value={cameraZoom}
+              onChange={(event) => setCameraZoom(Number(event.target.value))}
+              className="camera-range"
+              disabled={status === 'uploading'}
+            />
+          </div>
+
+          <div className="camera-tool camera-tool-inline">
+            <label className="camera-toggle">
+              <input
+                type="checkbox"
+                checked={showGrid}
+                onChange={(event) => setShowGrid(event.target.checked)}
+                disabled={status === 'uploading'}
+              />
+              Grid
+            </label>
+          </div>
         </div>
 
         <div
@@ -336,6 +440,9 @@ export default function CameraPage() {
               Re-take
             </button>
           )}
+          <button type="button" className="camera-btn secondary" onClick={switchCamera} disabled={status === 'uploading'}>
+            Switch Camera
+          </button>
           <label htmlFor={FILE_INPUT_ID} className="camera-btn secondary camera-upload-label">
             Upload Media
           </label>

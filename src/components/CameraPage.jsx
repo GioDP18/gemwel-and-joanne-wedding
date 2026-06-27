@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import './CameraPage.css';
 
-const API_ENDPOINT = '/api/upload-wedding-photo';
+const UPLOAD_API_PATH = '/api/upload-wedding-photo';
+const LOCAL_UPLOAD_SERVER_ORIGIN = 'http://localhost:8787';
 const FILE_INPUT_ID = 'camera-upload-input';
 const MAX_UPLOAD_DIMENSION = 1920;
 const JPEG_QUALITY = 0.86;
+
+function resolveUploadEndpoint() {
+  const configuredBase = import.meta.env.VITE_UPLOAD_API_BASE_URL?.trim();
+  if (configuredBase) {
+    return `${configuredBase.replace(/\/$/, '')}${UPLOAD_API_PATH}`;
+  }
+
+  if (typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    return `${LOCAL_UPLOAD_SERVER_ORIGIN}${UPLOAD_API_PATH}`;
+  }
+
+  return UPLOAD_API_PATH;
+}
 
 async function parseResponsePayload(response) {
   const text = await response.text();
@@ -12,7 +26,7 @@ async function parseResponsePayload(response) {
 
   try {
     return JSON.parse(text);
-  } catch (_error) {
+  } catch {
     return null;
   }
 }
@@ -26,7 +40,16 @@ function loadImageFromObjectUrl(objectUrl) {
   });
 }
 
-async function prepareFileDataUrl(file) {
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function prepareImageDataUrl(file) {
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await loadImageFromObjectUrl(objectUrl);
@@ -48,10 +71,35 @@ async function prepareFileDataUrl(file) {
   }
 }
 
+async function prepareUploadItem(file) {
+  if (file.type.startsWith('image/')) {
+    return {
+      id: crypto.randomUUID(),
+      name: file.name,
+      originalName: file.name,
+      mimeType: 'image/jpeg',
+      dataUrl: await prepareImageDataUrl(file),
+    };
+  }
+
+  if (file.type.startsWith('video/')) {
+    return {
+      id: crypto.randomUUID(),
+      name: file.name,
+      originalName: file.name,
+      mimeType: file.type,
+      dataUrl: await readFileAsDataUrl(file),
+    };
+  }
+
+  throw new Error(`Unsupported file type for ${file.name}.`);
+}
+
 export default function CameraPage() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const uploadEndpointRef = useRef(resolveUploadEndpoint());
   const [capturedImage, setCapturedImage] = useState('');
   const [uploadItems, setUploadItems] = useState([]);
   const [status, setStatus] = useState('idle');
@@ -77,7 +125,7 @@ export default function CameraPage() {
         try {
           stream = await navigator.mediaDevices.getUserMedia(constraint);
           break;
-        } catch (_error) {
+        } catch {
           // Keep trying fallbacks until one camera is available.
         }
       }
@@ -89,7 +137,7 @@ export default function CameraPage() {
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       setMessage('');
-    } catch (_error) {
+    } catch {
       setMessage('Camera access was blocked. Please allow camera permission and reload.');
     }
   };
@@ -125,6 +173,8 @@ export default function CameraPage() {
       {
         id: crypto.randomUUID(),
         name: `captured-${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`,
+        originalName: `captured-${new Date().toISOString().replace(/[:.]/g, '-')}.jpg`,
+        mimeType: 'image/jpeg',
         dataUrl,
       },
     ]);
@@ -140,27 +190,24 @@ export default function CameraPage() {
   };
 
   const addFiles = async (files) => {
-    const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
-    if (!imageFiles.length) {
-      setMessage('Please choose image files only.');
+    const supportedFiles = Array.from(files).filter(
+      (file) => file.type.startsWith('image/') || file.type.startsWith('video/'),
+    );
+    if (!supportedFiles.length) {
+      setMessage('Please choose image or video files only.');
       setStatus('error');
       return;
     }
 
     try {
-      const newItems = await Promise.all(
-        imageFiles.map(async (file) => ({
-          id: crypto.randomUUID(),
-          name: file.name,
-          dataUrl: await prepareFileDataUrl(file),
-        })),
-      );
+      const newItems = await Promise.all(supportedFiles.map((file) => prepareUploadItem(file)));
       setUploadItems((prev) => [...prev, ...newItems]);
-      setMessage(`${newItems.length} image${newItems.length > 1 ? 's' : ''} added.`);
+      const uploadLabel = newItems.length > 1 ? 'files' : 'file';
+      setMessage(`${newItems.length} ${uploadLabel} added.`);
       setStatus('idle');
     } catch (error) {
       setStatus('error');
-      setMessage(error.message || 'Failed to prepare selected images.');
+      setMessage(error.message || 'Failed to prepare selected media.');
     }
   };
 
@@ -173,18 +220,22 @@ export default function CameraPage() {
 
   const sendPhotos = async () => {
     if (!uploadItems.length) return;
+    const endpoint = uploadEndpointRef.current;
     setStatus('uploading');
-    setMessage(`Uploading ${uploadItems.length} photo${uploadItems.length > 1 ? 's' : ''}...`);
+    setMessage(`Uploading ${uploadItems.length} file${uploadItems.length > 1 ? 's' : ''}...`);
 
     try {
       for (const item of uploadItems) {
-        const response = await fetch(API_ENDPOINT, {
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             imageDataUrl: item.dataUrl,
+            fileName: item.name,
+            originalFileName: item.originalName,
+            mimeType: item.mimeType,
           }),
         });
 
@@ -202,11 +253,17 @@ export default function CameraPage() {
       }
 
       setStatus('success');
-      setMessage('All photos saved to Google Drive successfully.');
+      setMessage('All uploads saved to Google Drive successfully.');
       setUploadItems([]);
     } catch (error) {
       setStatus('error');
-      setMessage(error.message || 'Failed to upload photo.');
+      if (error?.name === 'TypeError' && /fetch/i.test(error.message || '')) {
+        setMessage(
+          `Unable to reach the upload server at ${endpoint}. Run "npm run dev:upload" alongside the app, or set VITE_UPLOAD_API_BASE_URL if the backend is hosted elsewhere.`,
+        );
+      } else {
+        setMessage(error.message || 'Failed to upload media.');
+      }
     }
   };
 
@@ -261,7 +318,7 @@ export default function CameraPage() {
             }
           }}
         >
-          <p>Drag and drop images here, or use Upload Images.</p>
+          <p>Drag and drop images or videos here, or use Upload Media.</p>
         </div>
 
         <div className="camera-actions">
@@ -280,12 +337,12 @@ export default function CameraPage() {
             </button>
           )}
           <label htmlFor={FILE_INPUT_ID} className="camera-btn secondary camera-upload-label">
-            Upload Images
+            Upload Media
           </label>
           <input
             id={FILE_INPUT_ID}
             type="file"
-            accept="image/*"
+            accept="image/*,video/*"
             multiple
             onChange={onFileInputChange}
             className="camera-upload-input"

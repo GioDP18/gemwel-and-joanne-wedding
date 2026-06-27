@@ -10,7 +10,7 @@ const app = express();
 const port = process.env.UPLOAD_SERVER_PORT || 8787;
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '2gb' }));
 
 const requiredEnv = [
   'GOOGLE_OAUTH_CLIENT_ID',
@@ -52,6 +52,52 @@ function dataUrlToBuffer(dataUrl) {
   return { buffer, mimeType };
 }
 
+function getFileExtension(mimeType) {
+  const mappedExtensions = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/quicktime': 'mov',
+  };
+
+  return mappedExtensions[mimeType] || 'bin';
+}
+
+function getFileExtensionFromName(fileName) {
+  const match = fileName?.match(/\.([^.]+)$/);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function buildUploadFileName(fileName, originalFileName, mimeType) {
+  const sourceName = originalFileName || fileName || 'wedding-moment';
+  const extension = getFileExtensionFromName(sourceName) || getFileExtension(mimeType);
+  const safeBaseName = sourceName
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'wedding-moment';
+
+  return `${safeBaseName}.${extension}`;
+}
+
+function formatUploadError(error) {
+  const googleError = error?.response?.data?.error || error?.message || '';
+  if (String(googleError).includes('invalid_grant')) {
+    return {
+      status: 401,
+      message:
+        'Google OAuth refresh token is invalid or revoked. Regenerate GOOGLE_OAUTH_REFRESH_TOKEN and update .env.upload.',
+    };
+  }
+
+  return {
+    status: 500,
+    message: error?.message || 'Failed to upload image to Google Drive.',
+  };
+}
+
 app.post('/api/upload-wedding-photo', async (req, res) => {
   try {
     const envError = validateEnv();
@@ -59,26 +105,30 @@ app.post('/api/upload-wedding-photo', async (req, res) => {
       return res.status(500).json({ error: envError });
     }
 
-    const { imageDataUrl } = req.body || {};
+    const { imageDataUrl, fileName, originalFileName, mimeType: providedMimeType } = req.body || {};
     if (!imageDataUrl) {
       return res.status(400).json({ error: 'imageDataUrl is required.' });
     }
 
-    const { buffer, mimeType } = dataUrlToBuffer(imageDataUrl);
+    const { buffer, mimeType: inferredMimeType } = dataUrlToBuffer(imageDataUrl);
+    const mimeType = providedMimeType || inferredMimeType;
     const drive = createDriveClient();
 
-    const now = new Date();
-    const fileName = `wedding-moment-${now.toISOString().replace(/[:.]/g, '-')}.jpg`;
+    const uploadFileName = buildUploadFileName(
+      fileName || `wedding-moment-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+      originalFileName,
+      mimeType,
+    );
 
     const upload = await drive.files.create({
       supportsAllDrives: true,
       requestBody: {
-        name: fileName,
+        name: uploadFileName,
         parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
       },
       media: {
         mimeType,
-        body: Readable.from(buffer),
+        body: Readable.from([buffer]),
       },
       fields: 'id,name,webViewLink',
     });
@@ -90,8 +140,9 @@ app.post('/api/upload-wedding-photo', async (req, res) => {
       webViewLink: upload.data.webViewLink || null,
     });
   } catch (error) {
-    return res.status(500).json({
-      error: error?.message || 'Failed to upload image to Google Drive.',
+    const uploadError = formatUploadError(error);
+    return res.status(uploadError.status).json({
+      error: uploadError.message,
     });
   }
 });
@@ -99,7 +150,8 @@ app.post('/api/upload-wedding-photo', async (req, res) => {
 app.use((error, _req, res, next) => {
   if (error?.type === 'entity.too.large') {
     return res.status(413).json({
-      error: 'Uploaded image is too large. Please try a smaller image.',
+      error:
+        'Uploaded media exceeded the server request limit. If you are running this locally, restart the upload server. If this is deployed, your hosting provider may still enforce its own request-size limit.',
     });
   }
 

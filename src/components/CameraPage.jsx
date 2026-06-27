@@ -82,6 +82,48 @@ function getCameraFilterCss(filterId) {
   return CAMERA_FILTERS.find((filter) => filter.id === filterId)?.css || 'none';
 }
 
+function isFrontCameraLabel(label = '') {
+  return /front|user|face|facetime/i.test(label);
+}
+
+function isRearCameraLabel(label = '') {
+  return /back|rear|environment|world|main/i.test(label);
+}
+
+function pickBestVideoDeviceId(devices, desiredFacingMode, currentDeviceId) {
+  const videoDevices = devices.filter((device) => device.kind === 'videoinput');
+  if (!videoDevices.length) return '';
+
+  const scoredDevices = videoDevices.map((device, index) => {
+    const label = device.label || '';
+    let score = index;
+
+    if (desiredFacingMode === 'user') {
+      if (isFrontCameraLabel(label)) score -= 1000;
+      if (isRearCameraLabel(label)) score += 1000;
+    } else {
+      if (isRearCameraLabel(label)) score -= 1000;
+      if (isFrontCameraLabel(label)) score += 1000;
+    }
+
+    if (device.deviceId === currentDeviceId) {
+      score += 10;
+    }
+
+    return { deviceId: device.deviceId, label, score };
+  });
+
+  scoredDevices.sort((a, b) => a.score - b.score);
+  const bestDevice = scoredDevices[0];
+
+  if (!bestDevice) return '';
+  if (bestDevice.deviceId === currentDeviceId && videoDevices.length > 1) {
+    return scoredDevices[1]?.deviceId || bestDevice.deviceId;
+  }
+
+  return bestDevice.deviceId;
+}
+
 async function prepareUploadItem(file) {
   if (file.type.startsWith('image/')) {
     return {
@@ -111,6 +153,7 @@ export default function CameraPage() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const uploadEndpointRef = useRef(resolveUploadEndpoint());
+  const currentDeviceIdRef = useRef('');
   const [capturedImage, setCapturedImage] = useState('');
   const [uploadItems, setUploadItems] = useState([]);
   const [status, setStatus] = useState('idle');
@@ -129,7 +172,12 @@ export default function CameraPage() {
 
     stopCamera();
     try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const preferredDeviceId = pickBestVideoDeviceId(devices, cameraFacingMode, currentDeviceIdRef.current);
       const candidates = [
+        ...(preferredDeviceId
+          ? [{ video: { deviceId: { exact: preferredDeviceId } }, audio: false }]
+          : []),
         { video: { facingMode: { exact: cameraFacingMode } }, audio: false },
         { video: { facingMode: { ideal: cameraFacingMode } }, audio: false },
         { video: true, audio: false },
@@ -150,6 +198,13 @@ export default function CameraPage() {
       }
 
       streamRef.current = stream;
+      const videoTrack = stream.getVideoTracks()[0];
+      const trackSettings = videoTrack?.getSettings?.() || {};
+      currentDeviceIdRef.current = trackSettings.deviceId || preferredDeviceId || '';
+      if (trackSettings.facingMode) {
+        setCameraFacingMode(trackSettings.facingMode);
+      }
+
       if (videoRef.current) videoRef.current.srcObject = stream;
       setMessage('');
     } catch {
@@ -257,6 +312,10 @@ export default function CameraPage() {
       setStatus('error');
       setMessage(error.message || 'Failed to prepare selected media.');
     }
+  };
+
+  const removeUploadItem = (itemId) => {
+    setUploadItems((prev) => prev.filter((item) => item.id !== itemId));
   };
 
   const onFileInputChange = async (event) => {
@@ -467,7 +526,20 @@ export default function CameraPage() {
         {uploadItems.length ? (
           <ul className="camera-upload-list">
             {uploadItems.map((item) => (
-              <li key={item.id}>{item.name}</li>
+              <li key={item.id} className="camera-upload-item">
+                <span className="camera-upload-name" title={item.name}>
+                  {item.name}
+                </span>
+                <button
+                  type="button"
+                  className="camera-upload-remove"
+                  onClick={() => removeUploadItem(item.id)}
+                  aria-label={`Remove ${item.name}`}
+                  disabled={status === 'uploading'}
+                >
+                  Remove
+                </button>
+              </li>
             ))}
           </ul>
         ) : null}

@@ -333,6 +333,44 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.camera-upload-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.camera-upload-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camera-upload-remove {
+  flex: 0 0 auto;
+  border: 1px solid #e1b9b1;
+  border-radius: 999px;
+  background: #fff5f3;
+  color: #9f382f;
+  font-family: "Manrope", sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: transform 0.1s ease, opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.camera-upload-remove:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.camera-upload-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .camera-message {
   margin-top: 12px;
   font-size: 0.95rem;
@@ -431,6 +469,20 @@
     padding-left: 18px;
     font-size: 0.9rem;
     max-height: 140px;
+  }
+
+  .camera-upload-item {
+    align-items: flex-start;
+  }
+
+  .camera-upload-name {
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .camera-upload-remove {
+    padding: 7px 10px;
+    font-size: 0.78rem;
   }
 
   .camera-message {
